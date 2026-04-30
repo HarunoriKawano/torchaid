@@ -52,6 +52,19 @@ class TrainFramework:
                 learning rate scheduler stepped after every training batch.
                 Defaults to ``None``.
         """
+        if not isinstance(model, TaskModule):
+            raise TypeError(f"model must be a TaskModule instance, got {type(model).__name__}")
+        if not isinstance(ls, BaseSettings):
+            raise TypeError(f"ls must be a BaseSettings instance, got {type(ls).__name__}")
+        if not isinstance(metric_calculator, BaseMetricCalculator):
+            raise TypeError(f"metric_calculator must be a BaseMetricCalculator instance, got {type(metric_calculator).__name__}")
+        if not isinstance(optimizer, torch.optim.Optimizer):
+            raise TypeError(f"optimizer must be a torch.optim.Optimizer instance, got {type(optimizer).__name__}")
+        if not isinstance(inputs_config, BaseInputs):
+            raise TypeError(f"inputs_config must be a BaseInputs instance, got {type(inputs_config).__name__}")
+        if scheduler is not None and not isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler):
+            raise TypeError(f"scheduler must be a LRScheduler instance or None, got {type(scheduler).__name__}")
+
         self._ls = ls
         self._device = torch.device(self._ls.device)
         self._task_module = model.to(self._device)
@@ -84,6 +97,17 @@ class TrainFramework:
             save_dir (str): Directory path where checkpoints, logs, and model
                 weights are saved. Created automatically if it does not exist.
         """
+        if not isinstance(train_dataset, Dataset):
+            raise TypeError(f"train_dataset must be a Dataset instance, got {type(train_dataset).__name__}")
+        if not isinstance(val_dataset, Dataset):
+            raise TypeError(f"val_dataset must be a Dataset instance, got {type(val_dataset).__name__}")
+        if not isinstance(save_dir, (str, os.PathLike)):
+            raise TypeError(f"save_dir must be a str or path-like object, got {type(save_dir).__name__}")
+        if len(train_dataset) == 0:
+            raise ValueError("train_dataset is empty")
+        if len(val_dataset) == 0:
+            raise ValueError("val_dataset is empty")
+
         os.makedirs(save_dir, exist_ok=True)
         checkpoint_path = Path(os.path.join(save_dir, "checkpoint.pth"))
 
@@ -96,7 +120,9 @@ class TrainFramework:
             pin_memory=True
         )
 
+        print("Running system check...")
         self._system_check(train_dataloader, val_dataloader, checkpoint_path)
+        print("System check passed.\n")
 
         if checkpoint_path.exists():
             checkpoint = torch.load(checkpoint_path)
@@ -105,20 +131,30 @@ class TrainFramework:
             self._metric_calculator.replace(checkpoint)
             if self._scheduler:
                 self._scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            print(f"Checkpoint found. Resuming from epoch {self._metric_calculator.metrics.epoch}/{self._ls.max_epoch_num}.\n")
+        else:
+            print("No checkpoint found. Starting training from scratch.\n")
 
+        remaining_epochs = self._ls.max_epoch_num - self._metric_calculator.metrics.epoch
         self._strong_print([
             "Training Start",
-            f"Max epoch: {self._ls.max_epoch_num - self._metric_calculator.metrics.epoch}",
-            f"Total step: {(self._ls.max_epoch_num - self._metric_calculator.metrics.epoch) * len(train_dataloader)}",
-            f"Model size: {self._num_params}"
+            f"Device:      {self._ls.device}",
+            f"Remaining epochs: {remaining_epochs}",
+            f"Steps per epoch:  {len(train_dataloader)}",
+            f"Total steps:      {remaining_epochs * len(train_dataloader)}",
+            f"Model parameters: {self._num_params:,}",
+            f"Mixed precision:  {self._ls.mixed_precision} ({self._ls.precision_dtype})",
+            f"Batch size:       {self._ls.batch_size}",
         ])
 
-        for _ in range(self._ls.max_epoch_num - self._metric_calculator.metrics.epoch):
+        for _ in range(remaining_epochs):
             self._metric_calculator.reset()
             self._loop(train_dataloader, Mode.TRAIN)
             self._loop(val_dataloader, Mode.VAL)
 
-            if self._metric_calculator.check():
+            improved = self._metric_calculator.check()
+            if improved:
+                print(f"  New best model at epoch {self._metric_calculator.metrics.epoch}. Saving weights...")
                 torch.save(self._task_module.state_dict(), os.path.join(save_dir, "best_model.pth"))
 
             epoch_log_df = pd.DataFrame(self._metric_calculator.metrics.model_dump())
@@ -130,7 +166,7 @@ class TrainFramework:
                 header=self._metric_calculator.metrics.epoch == 1
             )
 
-            self._strong_print(self._metric_calculator.metrics.model_dump())
+            self._strong_print([f"{k}: {v}" for k, v in self._metric_calculator.metrics.model_dump().items()])
 
             checkpoint = {
                 'model_state_dict': self._task_module.state_dict(),
@@ -139,9 +175,16 @@ class TrainFramework:
                 **self._metric_calculator.metrics.model_dump()
             }
             torch.save(checkpoint, checkpoint_path)
+            print(f"  Checkpoint saved to '{checkpoint_path}'.")
 
             if self._metric_calculator.early_stopping():
+                print(f"\nEarly stopping triggered at epoch {self._metric_calculator.metrics.epoch}.")
                 break
+
+        self._strong_print([
+            "Training complete.",
+            f"Results saved to '{save_dir}'.",
+        ])
 
         result_dict = {
             **self._metric_calculator.metrics.model_dump(),
@@ -164,14 +207,21 @@ class TrainFramework:
         Returns:
             BaseMetrics: The populated metrics object after the test loop.
         """
+        if not isinstance(test_dataset, Dataset):
+            raise TypeError(f"test_dataset must be a Dataset instance, got {type(test_dataset).__name__}")
+        if len(test_dataset) == 0:
+            raise ValueError("test_dataset is empty")
+
         test_dataloader = DataLoader(
             test_dataset, shuffle=False, batch_size=self._ls.batch_size, num_workers=self._ls.cpu_num_works,
             pin_memory=True, persistent_workers=True
         )
         self._metric_calculator.reset()
 
+        print("Starting test evaluation...")
         self._loop(test_dataloader, Mode.TEST)
         self._metric_calculator.test()
+        print("Test evaluation complete.\n")
         return self._metric_calculator.metrics
 
     def _loop(self, dataloader, mode: Mode):
@@ -287,6 +337,8 @@ class TrainFramework:
         Args:
             strings (list[str]): Lines of text to display inside the border.
         """
+        if not strings:
+            return
         max_length = max([len(string) for string in strings])
         print(f"\n{'=' * (max_length + 4)}")
         for string in strings:
@@ -315,7 +367,11 @@ class TrainFramework:
             path (str): File path to the ``.pth`` file containing the model
                 state dictionary (as saved by ``torch.save``).
         """
+        if not Path(path).exists():
+            raise FileNotFoundError(f"Model file not found: {path}")
+        print(f"Loading model weights from '{path}'...")
         self._task_module.load_state_dict(torch.load(path, map_location=self._ls.device))
+        print("Model loaded successfully.")
 
     def _system_check(self, train_dataloader: DataLoader, val_dataloader: DataLoader, checkpoint_path: Path, test_steps: int = 5):
         """Performs a sanity check by running a few steps before full training.
@@ -338,7 +394,9 @@ class TrainFramework:
             **self._metric_calculator.metrics.model_dump()
         }
         torch.save(checkpoint, checkpoint_path)
+        print(f"  Initial checkpoint saved.")
 
+        print(f"  Running {test_steps} train steps and {test_steps} val steps...")
         limited_train_loader = islice(train_dataloader, test_steps)
         limited_val_loader = islice(val_dataloader, test_steps)
 

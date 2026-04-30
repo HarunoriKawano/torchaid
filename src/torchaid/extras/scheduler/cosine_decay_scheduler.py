@@ -33,6 +33,15 @@ class CosineDecayScheduler:
                 learning rate from dropping below ``min_weight * base_lr``.
                 Defaults to ``0.05``.
         """
+        if max_steps <= 0:
+            raise ValueError(f"max_steps must be a positive integer, got {max_steps}")
+        if warmup_steps < 0:
+            raise ValueError(f"warmup_steps must be non-negative, got {warmup_steps}")
+        if warmup_steps > max_steps:
+            raise ValueError(f"warmup_steps ({warmup_steps}) must not exceed max_steps ({max_steps})")
+        if not 0.0 <= min_weight <= 1.0:
+            raise ValueError(f"min_weight must be in [0, 1], got {min_weight}")
+
         if max_warmup_steps < warmup_steps:
             self._warmup_steps = max_warmup_steps
         else:

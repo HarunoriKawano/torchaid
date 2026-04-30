@@ -16,7 +16,10 @@ def json_to_instance(path: str, structure: Type[BaseModel]):
         BaseModel: A validated instance of ``structure`` populated with the
             data from the JSON file.
     """
-    json_string = pathlib.Path(path).read_text()
+    p = pathlib.Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"File not found: {path}")
 
+    json_string = p.read_text()
     instance = structure.model_validate_json(json_string)
     return instance

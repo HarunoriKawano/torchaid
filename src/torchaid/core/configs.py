@@ -1,8 +1,8 @@
 from abc import ABC
 from enum import Enum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 import torch
 
 __all__ = ['BaseInputs', 'BaseOutputs', 'BaseMetrics', 'BaseSettings', 'Mode']
@@ -66,11 +66,11 @@ class BaseSettings(BaseModel, ABC):
             falls back to ``"cpu"``.
     """
 
-    batch_size: int
-    max_epoch_num: int
+    batch_size: Annotated[int, Field(gt=0)]
+    max_epoch_num: Annotated[int, Field(gt=0)]
     mixed_precision: bool = False
     precision_dtype: Literal["float16", "bfloat16"] = "bfloat16"
-    cpu_num_works: int = 4
+    cpu_num_works: Annotated[int, Field(ge=0)] = 4
     device: Literal["cuda", "cpu"] = "cuda" if torch.cuda.is_available() else "cpu"
 
 

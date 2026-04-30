@@ -24,4 +24,15 @@ def get_cycle_scheduler(optimizer: torch.optim.Optimizer, max_lr: float, min_lr:
         CyclicLR: A configured :class:`~torch.optim.lr_scheduler.CyclicLR`
             scheduler in ``"triangular2"`` mode.
     """
+    if max_lr <= 0:
+        raise ValueError(f"max_lr must be positive, got {max_lr}")
+    if min_lr < 0:
+        raise ValueError(f"min_lr must be non-negative, got {min_lr}")
+    if min_lr >= max_lr:
+        raise ValueError(f"min_lr ({min_lr}) must be less than max_lr ({max_lr})")
+    if warmup_steps <= 0:
+        raise ValueError(f"warmup_steps must be a positive integer, got {warmup_steps}")
+    if down_steps <= 0:
+        raise ValueError(f"down_steps must be a positive integer, got {down_steps}")
+
     return CyclicLR(optimizer, min_lr, max_lr, step_size_up=warmup_steps, step_size_down=down_steps, mode="triangular2")
