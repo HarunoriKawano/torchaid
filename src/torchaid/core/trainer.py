@@ -46,7 +46,7 @@ class TrainFramework:
             metric_calculator (BaseMetricCalculator): Calculator responsible for
                 accumulating and aggregating metrics each epoch.
             optimizer (torch.optim.Optimizer): Optimizer used for parameter updates.
-            inputs_config (BaseInputs): An instance of the task's input schema used
+            inputs_config (Type[BaseInputs]): The task's input schema class used
                 to validate and cast raw dataloader batches via ``model_validate``.
             scheduler (Optional[torch.optim.lr_scheduler.LRScheduler]): Optional
                 learning rate scheduler stepped after every training batch.
@@ -63,8 +63,8 @@ class TrainFramework:
             raise TypeError(f"metric_calculator must be a BaseMetricCalculator instance, got {type(metric_calculator).__name__}")
         if not isinstance(optimizer, torch.optim.Optimizer):
             raise TypeError(f"optimizer must be a torch.optim.Optimizer instance, got {type(optimizer).__name__}")
-        if not isinstance(inputs_config, BaseInputs):
-            raise TypeError(f"inputs_config must be a BaseInputs instance, got {type(inputs_config).__name__}")
+        if not (isinstance(inputs_config, type) and issubclass(inputs_config, BaseInputs)):
+            raise TypeError(f"inputs_config must be a subclass of BaseInputs, got {type(inputs_config).__name__}")
         if scheduler is not None and not isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler):
             raise TypeError(f"scheduler must be a LRScheduler instance or None, got {type(scheduler).__name__}")
 
