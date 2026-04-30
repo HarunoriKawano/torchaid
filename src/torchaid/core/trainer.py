@@ -1,7 +1,7 @@
 import os
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Type
 from itertools import islice
 
 from pydantic import BaseModel
@@ -35,7 +35,7 @@ class TrainFramework:
             ls: BaseSettings,
             metric_calculator: BaseMetricCalculator,
             optimizer: torch.optim.Optimizer,
-            inputs_config: BaseInputs,
+            inputs_config: Type[BaseInputs],
             scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
     ):
         """Initializes the training framework and moves the model to the target device.
