@@ -5,7 +5,7 @@ import pandas as pd
 from torch.utils.data import Dataset, random_split
 import torch
 
-__all__ = ["split_dataset"]
+__all__ = ["split_dataset", "split_dataframe"]
 
 def split_dataset(dataset: Dataset, ratios: list[float], seed: Optional[int] = None) -> list[Dataset]:
     """Splits a dataset into multiple subsets according to the given ratios.
