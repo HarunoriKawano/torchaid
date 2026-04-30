@@ -102,11 +102,30 @@ class BaseMetricCalculator(ABC, Generic[T]):
         pass
 
     def system_check(self):
-        """Prints the current metrics state to stdout.
+        """Prints a formatted summary of the current metrics state to stdout.
 
-        Used during the system sanity check phase before full training begins.
+        Displays all metric fields as ``key : value`` rows inside a bordered
+        block with a ``"System Check Results"`` title, separated from the
+        metric rows by a dashed line. Used during the system sanity check
+        phase before full training begins to confirm that the pipeline is
+        producing plausible values.
         """
-        print(self.metrics)
+        title = "System Check Results"
+        data = self.metrics.model_dump()
+
+        key_width = max(len(k) for k in data) if data else 0
+        rows = [f"{k:<{key_width}} : {v}" for k, v in data.items()]
+
+        content_width = max(len(title), max((len(r) for r in rows), default=0))
+        border = "=" * (content_width + 4)
+        separator = "-" * (content_width + 4)
+
+        print(f"\n{border}")
+        print(f"  {title:<{content_width}}  ")
+        print(separator)
+        for row in rows:
+            print(f"  {row:<{content_width}}  ")
+        print(f"{border}\n")
 
     def early_stopping(self) -> bool:
         """Determines whether training should stop early.

@@ -51,6 +51,9 @@ class TrainFramework:
             scheduler (Optional[torch.optim.lr_scheduler.LRScheduler]): Optional
                 learning rate scheduler stepped after every training batch.
                 Defaults to ``None``.
+
+        Raises:
+            TypeError: If any argument is not an instance of its expected type.
         """
         if not isinstance(model, TaskModule):
             raise TypeError(f"model must be a TaskModule instance, got {type(model).__name__}")
@@ -84,18 +87,47 @@ class TrainFramework:
     def train(self, train_dataset: Dataset, val_dataset: Dataset, save_dir: str):
         """Runs the full training loop with validation, checkpointing, and logging.
 
-        Before training begins, a system sanity check is performed using a small
-        number of batches. If a checkpoint exists in ``save_dir``, training resumes
-        from that checkpoint. After each epoch the best model weights are saved,
-        a CSV log is appended, and a checkpoint is written. Training terminates
-        early if :meth:`~torchaid.core.metrics.BaseMetricCalculator.early_stopping`
-        returns ``True``. A ``results.json`` file is written after the final epoch.
+        The following steps are executed in order:
+
+        1. **System check** — runs :meth:`_system_check` to verify the full
+           pipeline with a small number of batches. Prints ``"Running system
+           check..."`` before and ``"System check passed."`` after.
+        2. **Checkpoint resume** — if ``checkpoint.pth`` already exists in
+           ``save_dir``, :meth:`load_checkpoint` is called and the starting
+           epoch is printed. Otherwise prints ``"Starting training from
+           scratch."``.
+        3. **Training summary** — prints a bordered block listing device,
+           remaining epochs, steps per epoch, total steps, model parameter
+           count, mixed-precision settings, and batch size.
+        4. **Epoch loop** — for each remaining epoch, runs one training pass
+           then one validation pass via :meth:`_loop`. After validation:
+
+           - If :meth:`~torchaid.core.metrics.BaseMetricCalculator.check`
+             returns ``True``, prints a best-model message and saves weights
+             to ``best_checkpoint.pth`` via :meth:`save_checkpoint`.
+           - Appends a row to ``epoch_log.csv``.
+           - Prints a bordered metric summary for the epoch.
+           - Saves a rolling checkpoint to ``checkpoint.pth`` and prints the
+             save path.
+           - If :meth:`~torchaid.core.metrics.BaseMetricCalculator.early_stopping`
+             returns ``True``, prints an early-stopping message and exits the
+             loop.
+
+        5. **Completion** — prints a bordered ``"Training complete."`` block
+           and writes ``results.json`` containing all final metrics plus
+           ``num_params``.
 
         Args:
             train_dataset (Dataset): Dataset used for training.
             val_dataset (Dataset): Dataset used for validation.
-            save_dir (str): Directory path where checkpoints, logs, and model
-                weights are saved. Created automatically if it does not exist.
+            save_dir (str | os.PathLike): Directory where checkpoints, logs,
+                and model weights are saved. Created automatically if it does
+                not exist.
+
+        Raises:
+            TypeError: If ``train_dataset`` or ``val_dataset`` is not a
+                ``Dataset``, or if ``save_dir`` is not a str or path-like.
+            ValueError: If ``train_dataset`` or ``val_dataset`` is empty.
         """
         if not isinstance(train_dataset, Dataset):
             raise TypeError(f"train_dataset must be a Dataset instance, got {type(train_dataset).__name__}")
@@ -121,16 +153,11 @@ class TrainFramework:
         )
 
         print("Running system check...")
-        self._system_check(train_dataloader, val_dataloader, checkpoint_path)
+        self._system_check(train_dataloader, val_dataloader, save_dir)
         print("System check passed.\n")
 
         if checkpoint_path.exists():
-            checkpoint = torch.load(checkpoint_path)
-            self._task_module.load_state_dict(checkpoint['model_state_dict'])
-            self._optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self._metric_calculator.replace(checkpoint)
-            if self._scheduler:
-                self._scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            self.load_checkpoint(str(checkpoint_path))
             print(f"Checkpoint found. Resuming from epoch {self._metric_calculator.metrics.epoch}/{self._ls.max_epoch_num}.\n")
         else:
             print("No checkpoint found. Starting training from scratch.\n")
@@ -155,7 +182,7 @@ class TrainFramework:
             improved = self._metric_calculator.check()
             if improved:
                 print(f"  New best model at epoch {self._metric_calculator.metrics.epoch}. Saving weights...")
-                torch.save(self._task_module.state_dict(), os.path.join(save_dir, "best_model.pth"))
+                self.save_checkpoint(os.path.join(save_dir, "best_checkpoint.pth"))
 
             epoch_log_df = pd.DataFrame(self._metric_calculator.metrics.model_dump())
             epoch_log_df.to_csv(
@@ -168,13 +195,7 @@ class TrainFramework:
 
             self._strong_print([f"{k}: {v}" for k, v in self._metric_calculator.metrics.model_dump().items()])
 
-            checkpoint = {
-                'model_state_dict': self._task_module.state_dict(),
-                'optimizer_state_dict': self._optimizer.state_dict(),
-                'scheduler_state_dict': self._scheduler.state_dict() if self._scheduler else None,
-                **self._metric_calculator.metrics.model_dump()
-            }
-            torch.save(checkpoint, checkpoint_path)
+            self.save_checkpoint(str(checkpoint_path))
             print(f"  Checkpoint saved to '{checkpoint_path}'.")
 
             if self._metric_calculator.early_stopping():
@@ -197,15 +218,20 @@ class TrainFramework:
     def test(self, test_dataset: Dataset) -> BaseMetrics:
         """Runs inference on the test dataset and returns aggregated metrics.
 
-        The metric calculator is reset before the loop and
-        :meth:`~torchaid.core.metrics.BaseMetricCalculator.test` is called
-        afterwards to finalize the results.
+        Resets the metric calculator, prints ``"Starting test evaluation..."``,
+        runs one pass over ``test_dataset`` via :meth:`_loop`, finalizes metrics
+        with :meth:`~torchaid.core.metrics.BaseMetricCalculator.test`, and
+        prints ``"Test evaluation complete."``.
 
         Args:
             test_dataset (Dataset): Dataset used for evaluation.
 
         Returns:
             BaseMetrics: The populated metrics object after the test loop.
+
+        Raises:
+            TypeError: If ``test_dataset`` is not a ``Dataset`` instance.
+            ValueError: If ``test_dataset`` is empty.
         """
         if not isinstance(test_dataset, Dataset):
             raise TypeError(f"test_dataset must be a Dataset instance, got {type(test_dataset).__name__}")
@@ -252,9 +278,12 @@ class TrainFramework:
                     self._metric_calculator.metrics.step += 1
                     outputs, batch = self._train_step(data)
                     display_items = self._metric_calculator.train_step(outputs, batch)
-                else:
-                    outputs, batch = self._eval_step(data)
+                elif mode is Mode.VAL:
+                    outputs, batch = self._eval_step(data, Mode.VAL)
                     display_items = self._metric_calculator.val_step(outputs, batch)
+                else:
+                    outputs, batch = self._eval_step(data, Mode.TEST)
+                    display_items = self._metric_calculator.test_step(outputs, batch)
                 pbar.set_postfix(display_items)
 
 
@@ -280,7 +309,7 @@ class TrainFramework:
         self._optimizer.zero_grad(set_to_none=True)
         dtype = torch.bfloat16 if self._ls.precision_dtype == "bfloat16" else torch.float16
         with autocast(device_type=self._device.type, enabled=self._ls.mixed_precision, dtype=dtype):
-            outputs: BaseOutputs = self._task_module(mode="train", batch = batch)
+            outputs: BaseOutputs = self._task_module(Mode.TRAIN, batch=batch)
 
         if self._use_scaler:
             self._scaler.scale(outputs.loss).backward()
@@ -299,7 +328,7 @@ class TrainFramework:
         return outputs, batch
 
 
-    def _eval_step(self, batch: dict[str, torch.Tensor]):
+    def _eval_step(self, batch: dict[str, torch.Tensor], mode: Mode):
         """Executes a single evaluation step without gradient computation.
 
         Validates the raw batch dict, runs the forward pass under optional
@@ -309,6 +338,8 @@ class TrainFramework:
         Args:
             batch (dict[str, torch.Tensor]): Raw batch dictionary from the
                 ``DataLoader``.
+            mode (Mode): Either ``Mode.VAL`` or ``Mode.TEST``. Passed directly
+                to the model so it can adjust its output accordingly.
 
         Returns:
             tuple[BaseOutputs, BaseInputs]: The model outputs and the validated
@@ -319,7 +350,7 @@ class TrainFramework:
 
         dtype = torch.bfloat16 if self._ls.precision_dtype == "bfloat16" else torch.float16
         with autocast(device_type=self._device.type, enabled=self._ls.mixed_precision, dtype=dtype):
-            outputs = self._task_module(mode="eval", batch=batch)
+            outputs = self._task_module(mode, batch=batch)
 
         self._to_device(batch, torch.device("cpu"))
         self._to_device(outputs, torch.device("cpu"))
@@ -363,9 +394,17 @@ class TrainFramework:
     def load_model(self, path: str):
         """Loads model weights from a saved state-dict file.
 
+        Prints ``"Loading model weights from '<path>'..."`` before loading and
+        ``"Model loaded successfully."`` on completion.
+
         Args:
-            path (str): File path to the ``.pth`` file containing the model
-                state dictionary (as saved by ``torch.save``).
+            path (str): File path to the ``.pth`` file containing only the
+                model state dictionary (as saved by ``torch.save`` on
+                ``model.state_dict()``). Use :meth:`load_checkpoint` to restore
+                the full training state including optimizer and metrics.
+
+        Raises:
+            FileNotFoundError: If no file exists at ``path``.
         """
         if not Path(path).exists():
             raise FileNotFoundError(f"Model file not found: {path}")
@@ -373,19 +412,41 @@ class TrainFramework:
         self._task_module.load_state_dict(torch.load(path, map_location=self._ls.device))
         print("Model loaded successfully.")
 
-    def _system_check(self, train_dataloader: DataLoader, val_dataloader: DataLoader, checkpoint_path: Path, test_steps: int = 5):
-        """Performs a sanity check by running a few steps before full training.
+    def load_checkpoint(self, path: str):
+        """Restores the full training state from a checkpoint file.
 
-        Saves an initial checkpoint, then runs ``test_steps`` training and
-        validation batches to verify that the model, optimizer, and data
-        pipeline are all configured correctly. Prints current metrics at the end.
+        Loads model weights, optimizer state, optional scheduler state, and
+        metric values from a file previously written by :meth:`save_checkpoint`.
+        Metric fields are applied via
+        :meth:`~torchaid.core.metrics.BaseMetricCalculator.replace`, so only
+        keys that match declared metric fields are restored; extra keys are
+        silently ignored.
 
         Args:
-            train_dataloader (DataLoader): Training dataloader to sample from.
-            val_dataloader (DataLoader): Validation dataloader to sample from.
-            checkpoint_path (Path): Path where the initial checkpoint is written.
-            test_steps (int): Number of batches to process from each dataloader.
-                Defaults to ``5``.
+            path (str): File path to the checkpoint ``.pth`` file.
+
+        Raises:
+            FileNotFoundError: If no file exists at ``path``.
+        """
+        if not Path(path).exists():
+            raise FileNotFoundError(f"Checkpoint file not found: {path}")
+        checkpoint = torch.load(path)
+        self._task_module.load_state_dict(checkpoint['model_state_dict'])
+        self._optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self._metric_calculator.replace(checkpoint)
+        if self._scheduler:
+            self._scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+    def save_checkpoint(self, path: str):
+        """Saves the current training state to a checkpoint file.
+
+        Writes model weights, optimizer state, optional scheduler state, and
+        all metric fields to ``path`` using ``torch.save``. The resulting file
+        can be restored later with :meth:`load_checkpoint`.
+
+        Args:
+            path (str): Destination file path for the checkpoint ``.pth`` file.
+                Parent directories must already exist.
         """
         checkpoint = {
             'model_state_dict': self._task_module.state_dict(),
@@ -393,8 +454,35 @@ class TrainFramework:
             'scheduler_state_dict': self._scheduler.state_dict() if self._scheduler else None,
             **self._metric_calculator.metrics.model_dump()
         }
-        torch.save(checkpoint, checkpoint_path)
-        print(f"  Initial checkpoint saved.")
+        torch.save(checkpoint, path)
+
+    def _system_check(self, train_dataloader: DataLoader, val_dataloader: DataLoader, save_dir: str, test_steps: int = 5):
+        """Performs a sanity check by running a few steps before full training.
+
+        Saves the current state to a temporary checkpoint
+        ``<save_dir>/system_check.pth`` via :meth:`save_checkpoint`, resets the
+        metric calculator, then runs ``test_steps`` training and ``test_steps``
+        validation batches to verify that the model, optimizer, data pipeline,
+        and metric calculator are all configured correctly. Prints progress via
+        ``"Running N train steps and N val steps..."`` and displays a metric
+        summary via :meth:`~torchaid.core.metrics.BaseMetricCalculator.system_check`.
+        Afterwards, the initial state is fully restored from the temporary
+        checkpoint via :meth:`load_checkpoint` so that epoch and step counters
+        are reset to zero before actual training begins. The temporary file is
+        deleted on completion.
+
+        Args:
+            train_dataloader (DataLoader): Training dataloader to sample from.
+            val_dataloader (DataLoader): Validation dataloader to sample from.
+            save_dir (str): Directory in which the temporary checkpoint is
+                written. Must already exist.
+            test_steps (int): Number of batches to run from each dataloader.
+                Defaults to ``5``.
+        """
+        temp_path = Path(os.path.join(save_dir, "system_check.pth"))
+        self.save_checkpoint(str(temp_path))
+
+        self._metric_calculator.reset()
 
         print(f"  Running {test_steps} train steps and {test_steps} val steps...")
         limited_train_loader = islice(train_dataloader, test_steps)
@@ -404,3 +492,7 @@ class TrainFramework:
         self._loop(limited_val_loader, Mode.VAL)
         self._metric_calculator.check()
         self._metric_calculator.system_check()
+
+        self.load_checkpoint(str(temp_path))
+        self._metric_calculator.reset()
+        temp_path.unlink()
