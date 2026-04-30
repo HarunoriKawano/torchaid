@@ -28,7 +28,7 @@ class BaseOutputs(BaseModel, ABC):
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    loss: torch.FloatTensor
+    loss: torch.Tensor
 
 class BaseMetrics(BaseModel, ABC):
     """Abstract base class for tracking training metrics.

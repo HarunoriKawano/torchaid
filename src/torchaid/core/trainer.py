@@ -184,7 +184,7 @@ class TrainFramework:
                 print(f"  New best model at epoch {self._metric_calculator.metrics.epoch}. Saving weights...")
                 self.save_checkpoint(os.path.join(save_dir, "best_checkpoint.pth"))
 
-            epoch_log_df = pd.DataFrame(self._metric_calculator.metrics.model_dump())
+            epoch_log_df = pd.DataFrame([self._metric_calculator.metrics.model_dump()])
             epoch_log_df.to_csv(
                 os.path.join(save_dir, "epoch_log.csv"),
                 encoding="utf-8",
