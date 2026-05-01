@@ -1,7 +1,7 @@
 import os
 import json
 from pathlib import Path
-from typing import Optional, Type
+from typing import Optional, Type, Any
 from itertools import islice
 
 from pydantic import BaseModel
@@ -322,8 +322,8 @@ class TrainFramework:
         if self._scheduler:
             self._scheduler.step()
 
-        self._to_device(batch, torch.device("cpu"))
-        self._to_device(outputs, torch.device("cpu"))
+        self._to_device(batch, torch.device("cpu"), detach=True)
+        self._to_device(outputs, torch.device("cpu"), detach=True)
 
         return outputs, batch
 
@@ -352,8 +352,8 @@ class TrainFramework:
         with autocast(device_type=self._device.type, enabled=self._ls.mixed_precision, dtype=dtype):
             outputs = self._task_module(mode, batch=batch)
 
-        self._to_device(batch, torch.device("cpu"))
-        self._to_device(outputs, torch.device("cpu"))
+        self._to_device(batch, torch.device("cpu"), detach=True)
+        self._to_device(outputs, torch.device("cpu"), detach=True)
 
         return outputs, batch
 
@@ -376,20 +376,41 @@ class TrainFramework:
             print(f" {string:<{max_length}} ")
         print(f"{'=' * (max_length + 4)}\n")
 
-    @staticmethod
-    def _to_device(values: BaseModel, device: torch.device):
-        """Moves all ``torch.Tensor`` fields of a Pydantic model to the given device in-place.
+    def _to_device(self, obj: Any, device: torch.device, detach: bool = False):
+        """Recursively moves tensors within a nested structure to the specified device.
+
+        Traverses ``dict``, ``list``, and ``tuple`` containers, applying itself
+        to each element. Unsupported types are returned unchanged.
 
         Args:
-            values (BaseModel): A Pydantic model instance whose tensor fields
-                should be transferred (e.g., a ``BaseInputs`` or ``BaseOutputs``
-                subclass instance).
-            device (torch.device): Target device (e.g., ``torch.device("cuda")``
-                or ``torch.device("cpu")``).
+            obj (Any): The object to process. Supported types are ``torch.Tensor``,
+                ``dict``, ``list``, ``tuple``, and any other type (returned as-is).
+            device (torch.device): The target device to move tensors to.
+            detach (bool): If ``True``, detaches ``obj`` from the computation graph
+                before moving it. Applies only when ``obj`` is a ``torch.Tensor``.
+                Defaults to ``False``.
+
+        Returns:
+            Any: A copy of ``obj`` with ``torch.Tensor`` leaves moved to ``device``.
+            Container types are rebuilt as new objects; non-tensor scalars and
+            unrecognised objects are passed through unchanged.
         """
-        for field_name, value in values:
-            if isinstance(value, torch.Tensor):
-                setattr(values, field_name, value.to(device))
+        if isinstance(obj, torch.Tensor):
+            if detach:
+                return obj.detach().to(device)
+            return obj.to(device)
+
+        elif isinstance(obj, dict):
+            return {k: self._to_device(v, device, detach=detach) for k, v in obj.items()}
+
+        elif isinstance(obj, list):
+            return [self._to_device(v, device, detach=detach) for v in obj]
+
+        elif isinstance(obj, tuple):
+            return tuple(self._to_device(v, device, detach=detach) for v in obj)
+
+        else:
+            return obj
 
     def load_model(self, path: str):
         """Loads model weights from a saved state-dict file.
