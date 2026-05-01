@@ -1,7 +1,7 @@
 import os
 import json
 from pathlib import Path
-from typing import Optional, Type, Any
+from typing import Optional, Type, Any, Callable
 from itertools import islice
 
 from pydantic import BaseModel
@@ -36,7 +36,8 @@ class TrainFramework:
             metric_calculator: BaseMetricCalculator,
             optimizer: torch.optim.Optimizer,
             inputs_config: Type[BaseInputs],
-            scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None
+            scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+            collate_fn: Optional[Callable[..., Any]] = None
     ):
         """Initializes the training framework and moves the model to the target device.
 
@@ -51,6 +52,10 @@ class TrainFramework:
             scheduler (Optional[torch.optim.lr_scheduler.LRScheduler]): Optional
                 learning rate scheduler stepped after every training batch.
                 Defaults to ``None``.
+            collate_fn (Optional[Callable[..., Any]]): Optional collate function
+                passed to every ``DataLoader`` created by this framework. Useful
+                for custom batching logic (e.g. variable-length sequences).
+                Defaults to ``None`` (uses PyTorch's default collation).
 
         Raises:
             TypeError: If any argument is not an instance of its expected type.
@@ -79,6 +84,7 @@ class TrainFramework:
 
         self._use_scaler = self._ls.mixed_precision and self._ls.precision_dtype == "float16"
         self._scaler = GradScaler(enabled=self._use_scaler)
+        self._collate_fn = collate_fn
 
         self._num_params: int = 0
         for p in self._task_module.parameters():
@@ -145,11 +151,11 @@ class TrainFramework:
 
         train_dataloader = DataLoader(
             train_dataset, shuffle=True, batch_size=self._ls.batch_size, num_workers=self._ls.cpu_num_works,
-            pin_memory=True
+            pin_memory=True, persistent_workers=True, collate_fn=self._collate_fn
         )
         val_dataloader = DataLoader(
             val_dataset, shuffle=False, batch_size=self._ls.batch_size, num_workers=self._ls.cpu_num_works,
-            pin_memory=True
+            pin_memory=True, persistent_workers=True, collate_fn=self._collate_fn
         )
 
         print("Running system check...")
@@ -240,7 +246,7 @@ class TrainFramework:
 
         test_dataloader = DataLoader(
             test_dataset, shuffle=False, batch_size=self._ls.batch_size, num_workers=self._ls.cpu_num_works,
-            pin_memory=True, persistent_workers=True
+            pin_memory=True, persistent_workers=True, collate_fn=self._collate_fn
         )
         self._metric_calculator.reset()
 
