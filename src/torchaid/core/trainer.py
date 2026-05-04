@@ -215,19 +215,21 @@ class TrainFramework:
             json.dump(result_dict, f)
 
 
-    def test(self, test_dataset: Dataset) -> BaseMetrics:
+    def test(self, test_dataset: Dataset) -> Any:
         """Runs inference on the test dataset and returns aggregated metrics.
 
         Resets the metric calculator, prints ``"Starting test evaluation..."``,
-        runs one pass over ``test_dataset`` via :meth:`_loop`, finalizes metrics
-        with :meth:`~torchaid.core.metrics.BaseMetricCalculator.test`, and
-        prints ``"Test evaluation complete."``.
+        runs one pass over ``test_dataset`` via :meth:`_loop`, calls
+        :meth:`~torchaid.core.metrics.BaseMetricCalculator.test` to finalize
+        metrics, and prints ``"Test evaluation complete."``.
 
         Args:
             test_dataset (Dataset): Dataset used for evaluation.
 
         Returns:
-            BaseMetrics: The populated metrics object after the test loop.
+            Any: The value returned by
+                :meth:`~torchaid.core.metrics.BaseMetricCalculator.test`.
+                Typically the populated metrics instance.
 
         Raises:
             TypeError: If ``test_dataset`` is not a ``Dataset`` instance.
@@ -246,9 +248,9 @@ class TrainFramework:
 
         print("Starting test evaluation...")
         self._loop(test_dataloader, Mode.TEST)
-        self._metric_calculator.test()
+        results = self._metric_calculator.test()
         print("Test evaluation complete.\n")
-        return self._metric_calculator.metrics
+        return results
 
     def _loop(self, dataloader, mode: Mode):
         """Iterates over a dataloader for one epoch in the given mode.

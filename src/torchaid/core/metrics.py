@@ -83,11 +83,17 @@ class BaseMetricCalculator(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def test(self):
+    def test(self) -> Any:
         """Finalizes test-phase metrics after all test steps have been processed.
 
         Called once after the test loop completes. Subclasses should compute
-        and store final test statistics in :attr:`metrics`.
+        and store final test statistics in :attr:`metrics`, then return the
+        results. The return value is propagated directly by
+        :meth:`~torchaid.core.trainer.TrainFramework.test`.
+
+        Returns:
+            Any: The computed test results. Typically the :attr:`metrics`
+                instance or a summary dict.
         """
         pass
 

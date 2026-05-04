@@ -186,13 +186,18 @@ class MetricsCalculator(BaseMetricCalculator[Metrics]):
             return True
         return False
 
-    def test(self):
+    def test(self) -> Any:
         """Finalizes test metrics from accumulated predictions and losses.
 
-        Stores mean test loss, accuracy, and macro F1 into :attr:`metrics`.
+        Stores mean test loss, accuracy, and macro F1 into :attr:`metrics`,
+        then returns the metrics instance.
+
+        Returns:
+            Metrics: The populated :class:`Metrics` instance after the test loop.
         """
         self.metrics.test_loss = statistics.mean(self._eval_loss_list)
         self.metrics.test_accuracy, self.metrics.test_f1_score = self.eval()
+        return self.metrics
 
     def reset(self):
         """Clears all per-epoch accumulators."""
