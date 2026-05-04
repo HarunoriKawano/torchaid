@@ -4,7 +4,7 @@
 
 ## Features
 
-- **Structured training abstractions** — type-safe base classes for inputs, outputs, metrics, and settings built on Pydantic v2
+- **Structured training abstractions** — base classes for metrics and settings built on Pydantic v2
 - **Training framework** — a full training loop with mixed-precision support, automatic checkpointing, metric logging (CSV), and early stopping
 - **Transformer modules** — standard and relative-position-aware Transformer encoder layers with multi-head self-attention
 - **Task templates** — ready-to-use implementation for multi-label classification
@@ -32,24 +32,13 @@ pip install -e .
 
 ## Quick Start
 
-### 1. Define your data schema
+### 1. Implement your model
+
+Batches are plain `dict[str, Any]`. `forward` returns a `(outputs, error)` tuple — set `error` to a non-`None` value to signal a recoverable per-batch error; the framework will skip backpropagation and log it to stderr.
 
 ```python
-from torchaid import BaseInputs, BaseOutputs
-import torch
-
-class MyInputs(BaseInputs):
-    input_ids: torch.Tensor   # (B, L)
-    labels: torch.LongTensor  # (B,)
-
-class MyOutputs(BaseOutputs):
-    logits: torch.Tensor      # (B, num_classes)
-```
-
-### 2. Implement your model
-
-```python
-from torchaid import TaskModule, Mode, BaseOutputs
+from torchaid import TaskModule, Mode
+from typing import Any, Optional
 from torch import nn
 
 class MyModel(TaskModule):
@@ -59,14 +48,16 @@ class MyModel(TaskModule):
         self.classifier = nn.Linear(128, num_classes)
         self.criterion = nn.CrossEntropyLoss()
 
-    def forward(self, mode: Mode, batch: MyInputs) -> BaseOutputs:
-        x = self.embed(batch.input_ids).mean(dim=1)
+    def forward(self, mode: Mode, batch: dict[str, Any]) -> tuple[dict[str, Any], Optional[Any]]:
+        x = self.embed(batch["input_ids"]).mean(dim=1)
         logits = self.classifier(x)
-        loss = self.criterion(logits, batch.labels)
-        return MyOutputs(loss=loss, logits=logits)
+        loss = self.criterion(logits, batch["labels"])
+        if mode == Mode.TRAIN:
+            return {"loss": loss}, None
+        return {"loss": loss, "logits": logits}, None
 ```
 
-### 3. Define metrics and settings
+### 2. Define metrics and settings
 
 ```python
 from torchaid import BaseMetrics, BaseSettings, BaseMetricCalculator
@@ -85,15 +76,15 @@ class MyCalculator(BaseMetricCalculator[MyMetrics]):
         super().__init__(MyMetrics())
         self._losses: list[float] = []
 
-    def train_step(self, outputs, batch) -> dict[str, Any]:
-        loss = outputs.loss.item()
+    def train_step(self, outputs: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
+        loss = outputs["loss"].item()
         self._losses.append(loss)
         return {"loss": loss}
 
-    def val_step(self, outputs, batch) -> dict[str, Any]:
+    def val_step(self, outputs: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
         return self.train_step(outputs, batch)
 
-    def test_step(self, outputs, batch) -> dict[str, Any]:
+    def test_step(self, outputs: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
         return self.train_step(outputs, batch)
 
     def check(self) -> bool:
@@ -107,7 +98,7 @@ class MyCalculator(BaseMetricCalculator[MyMetrics]):
         self._losses.clear()
 ```
 
-### 4. Train
+### 3. Train
 
 ```python
 import torch
@@ -122,7 +113,6 @@ framework = TrainFramework(
     ls=settings,
     metric_calculator=MyCalculator(),
     optimizer=optimizer,
-    inputs_config=MyInputs,
 )
 
 framework.train(train_dataset, val_dataset, save_dir="./outputs")
@@ -132,7 +122,7 @@ framework.train(train_dataset, val_dataset, save_dir="./outputs")
 
 | Module | Description |
 |--------|-------------|
-| `torchaid.core` | Base classes (`BaseInputs`, `BaseOutputs`, `BaseMetrics`, `BaseSettings`, `TaskModule`, `BaseMetricCalculator`, `Mode`) and `TrainFramework` |
+| `torchaid.core` | Base classes (`BaseMetrics`, `BaseSettings`, `TaskModule`, `BaseMetricCalculator`, `Mode`) and `TrainFramework` |
 | `torchaid.templates.multilabel_classification` | Complete template for multi-label classification |
 | `torchaid.extras.modules.transformer` | `Transformer`, `TransformerWithRelativePosition`, and sub-modules |
 | `torchaid.extras.modules.positional_encoders` | `PositionalEmbedding`, `RelativePositionEmbedding` |
@@ -156,7 +146,6 @@ framework = TrainFramework(
     ls=settings,
     metric_calculator=mlc.MetricsCalculator(),
     optimizer=optimizer,
-    inputs_config=mlc.Inputs,
 )
 ```
 

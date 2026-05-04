@@ -1,3 +1,3 @@
-from .core import BaseMetrics, BaseSettings, BaseInputs, BaseOutputs, BaseMetricCalculator, TaskModule, Mode, TrainFramework
+from .core import BaseMetrics, BaseSettings, BaseMetricCalculator, TaskModule, Mode, TrainFramework
 
-__version__ = "0.1.5"
+__version__ = "0.1.6"
