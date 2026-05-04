@@ -4,14 +4,13 @@ from pathlib import Path
 from typing import Optional, Type, Any, Callable
 from itertools import islice
 
-from pydantic import BaseModel
 import pandas as pd
 from tqdm import tqdm
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.amp import GradScaler, autocast
 
-from . import TaskModule, BaseSettings, BaseMetricCalculator, BaseMetrics, BaseInputs, BaseOutputs
+from . import TaskModule, BaseSettings, BaseMetricCalculator, BaseMetrics
 from .configs import Mode
 
 __all__ = ['TrainFramework']
@@ -35,7 +34,6 @@ class TrainFramework:
             ls: BaseSettings,
             metric_calculator: BaseMetricCalculator,
             optimizer: torch.optim.Optimizer,
-            inputs_config: Type[BaseInputs],
             scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
             collate_fn: Optional[Callable[..., Any]] = None
     ):
@@ -47,8 +45,6 @@ class TrainFramework:
             metric_calculator (BaseMetricCalculator): Calculator responsible for
                 accumulating and aggregating metrics each epoch.
             optimizer (torch.optim.Optimizer): Optimizer used for parameter updates.
-            inputs_config (Type[BaseInputs]): The task's input schema class used
-                to validate and cast raw dataloader batches via ``model_validate``.
             scheduler (Optional[torch.optim.lr_scheduler.LRScheduler]): Optional
                 learning rate scheduler stepped after every training batch.
                 Defaults to ``None``.
@@ -68,8 +64,6 @@ class TrainFramework:
             raise TypeError(f"metric_calculator must be a BaseMetricCalculator instance, got {type(metric_calculator).__name__}")
         if not isinstance(optimizer, torch.optim.Optimizer):
             raise TypeError(f"optimizer must be a torch.optim.Optimizer instance, got {type(optimizer).__name__}")
-        if not (isinstance(inputs_config, type) and issubclass(inputs_config, BaseInputs)):
-            raise TypeError(f"inputs_config must be a subclass of BaseInputs, got {type(inputs_config).__name__}")
         if scheduler is not None and not isinstance(scheduler, torch.optim.lr_scheduler.LRScheduler):
             raise TypeError(f"scheduler must be a LRScheduler instance or None, got {type(scheduler).__name__}")
 
@@ -80,7 +74,6 @@ class TrainFramework:
         self._optimizer = optimizer
         self._scheduler = scheduler
         self._metric_calculator = metric_calculator
-        self._inputs_config = inputs_config
 
         self._use_scaler = self._ls.mixed_precision and self._ls.precision_dtype == "float16"
         self._scaler = GradScaler(enabled=self._use_scaler)
@@ -293,73 +286,76 @@ class TrainFramework:
                 pbar.set_postfix(display_items)
 
 
-    def _train_step(self, batch: dict[str, torch.Tensor]):
+    def _train_step(self, batch: dict[str, Any]):
         """Executes a single training step including forward pass and backpropagation.
 
-        Validates the raw batch dict into the typed inputs schema, runs the
-        forward pass under optional mixed-precision autocast, computes gradients,
-        and updates the optimizer (and scaler when using ``float16``). Tensors are
-        moved back to CPU after the step.
+        Moves the batch to the target device, runs the forward pass under optional
+        mixed-precision autocast, computes gradients, and updates the optimizer
+        (and scaler when using ``float16``). Tensors are moved back to CPU after
+        the step.
 
         Args:
-            batch (dict[str, torch.Tensor]): Raw batch dictionary from the
-                ``DataLoader``, keyed by field names of the inputs schema.
+            batch (dict[str, Any]): Raw batch dictionary from the ``DataLoader``.
 
         Returns:
-            tuple[BaseOutputs, BaseInputs]: The model outputs and the validated
-                input batch, both on CPU.
+            tuple[dict[str, Any], dict[str, Any]]: The model outputs and the input
+                batch, both with tensors on CPU.
+
+        Raises:
+            KeyError: If the model output dict does not contain a ``"loss"`` key.
         """
-        batch = self._inputs_config.model_validate(batch)
-        self._to_device(batch, torch.device(self._device))
+        batch = self._to_device(batch, torch.device(self._device))
 
         self._optimizer.zero_grad(set_to_none=True)
         dtype = torch.bfloat16 if self._ls.precision_dtype == "bfloat16" else torch.float16
         with autocast(device_type=self._device.type, enabled=self._ls.mixed_precision, dtype=dtype):
-            outputs: BaseOutputs = self._task_module(Mode.TRAIN, batch=batch)
+            outputs: dict[str, Any] = self._task_module(Mode.TRAIN, batch=batch)
+
+        if "loss" not in outputs:
+            raise KeyError(
+                f"Model output must contain a 'loss' key for backpropagation, got keys: {list(outputs.keys())}"
+            )
 
         if self._use_scaler:
-            self._scaler.scale(outputs.loss).backward()
+            self._scaler.scale(outputs["loss"]).backward()
             self._scaler.step(self._optimizer)
             self._scaler.update()
         else:
-            outputs.loss.backward()
+            outputs["loss"].backward()
             self._optimizer.step()
 
         if self._scheduler:
             self._scheduler.step()
 
-        self._to_device(batch, torch.device("cpu"), detach=True)
-        self._to_device(outputs, torch.device("cpu"), detach=True)
+        batch = self._to_device(batch, torch.device("cpu"), detach=True)
+        outputs = self._to_device(outputs, torch.device("cpu"), detach=True)
 
         return outputs, batch
 
 
-    def _eval_step(self, batch: dict[str, torch.Tensor], mode: Mode):
+    def _eval_step(self, batch: dict[str, Any], mode: Mode):
         """Executes a single evaluation step without gradient computation.
 
-        Validates the raw batch dict, runs the forward pass under optional
-        mixed-precision autocast with ``torch.no_grad`` semantics, and moves
-        tensors back to CPU.
+        Moves the batch to the target device, runs the forward pass under optional
+        mixed-precision autocast, and moves tensors back to CPU.
 
         Args:
-            batch (dict[str, torch.Tensor]): Raw batch dictionary from the
-                ``DataLoader``.
+            batch (dict[str, Any]): Raw batch dictionary from the ``DataLoader``.
             mode (Mode): Either ``Mode.VAL`` or ``Mode.TEST``. Passed directly
                 to the model so it can adjust its output accordingly.
 
         Returns:
-            tuple[BaseOutputs, BaseInputs]: The model outputs and the validated
-                input batch, both on CPU.
+            tuple[dict[str, Any], dict[str, Any]]: The model outputs and the input
+                batch, both with tensors on CPU.
         """
-        batch = self._inputs_config.model_validate(batch)
-        self._to_device(batch, torch.device(self._device))
+        batch = self._to_device(batch, torch.device(self._device))
 
         dtype = torch.bfloat16 if self._ls.precision_dtype == "bfloat16" else torch.float16
         with autocast(device_type=self._device.type, enabled=self._ls.mixed_precision, dtype=dtype):
             outputs = self._task_module(mode, batch=batch)
 
-        self._to_device(batch, torch.device("cpu"), detach=True)
-        self._to_device(outputs, torch.device("cpu"), detach=True)
+        batch = self._to_device(batch, torch.device("cpu"), detach=True)
+        outputs = self._to_device(outputs, torch.device("cpu"), detach=True)
 
         return outputs, batch
 
@@ -382,7 +378,7 @@ class TrainFramework:
             print(f" {string:<{max_length}} ")
         print(f"{'=' * (max_length + 4)}\n")
 
-    def _to_device(self, obj: Any, device: torch.device, detach: bool = False):
+    def _to_device(self, obj: Any, device: torch.device, detach: bool = False) -> Any:
         """Recursively moves tensors within a nested structure to the specified device.
 
         Traverses ``dict``, ``list``, and ``tuple`` containers, applying itself

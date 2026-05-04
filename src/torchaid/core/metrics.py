@@ -1,8 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Any, TypeVar, Generic
 
-from . import BaseInputs, BaseOutputs
-
 __all__ = ['BaseMetricCalculator']
 T = TypeVar('T', bound='BaseMetrics')
 
@@ -31,7 +29,7 @@ class BaseMetricCalculator(ABC, Generic[T]):
         self.metrics = metrics
 
     @abstractmethod
-    def train_step(self, outputs: BaseOutputs, batch: BaseInputs) -> dict[str, Any]:
+    def train_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
         """Processes a single training step and updates internal accumulators.
 
         Args:
@@ -45,7 +43,7 @@ class BaseMetricCalculator(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def val_step(self, outputs: BaseOutputs, batch: BaseInputs) -> dict[str, Any]:
+    def val_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
         """Processes a single validation step and updates internal accumulators.
 
         Args:
@@ -58,7 +56,7 @@ class BaseMetricCalculator(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def test_step(self, outputs: BaseOutputs, batch: BaseInputs) -> dict[str, Any]:
+    def test_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
         """Processes a single test step and updates internal accumulators.
 
         Args:

@@ -5,30 +5,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 import torch
 
-__all__ = ['BaseInputs', 'BaseOutputs', 'BaseMetrics', 'BaseSettings', 'Mode']
-
-class BaseInputs(BaseModel, ABC):
-    """Abstract base class for model input data.
-
-    All task-specific input schemas must inherit from this class.
-    Arbitrary PyTorch tensor types are permitted as field values.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    pass
-
-class BaseOutputs(BaseModel, ABC):
-    """Abstract base class for model output data.
-
-    All task-specific output schemas must inherit from this class.
-    Subclasses must include at least the ``loss`` tensor returned by the model.
-
-    Attributes:
-        loss (torch.FloatTensor): Scalar loss tensor computed during the forward pass.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    loss: torch.Tensor
+__all__ = ['BaseMetrics', 'BaseSettings', 'Mode']
 
 class BaseMetrics(BaseModel, ABC):
     """Abstract base class for tracking training metrics.

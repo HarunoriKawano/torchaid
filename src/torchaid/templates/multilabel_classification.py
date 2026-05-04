@@ -6,41 +6,10 @@ from sklearn.metrics import f1_score
 import torch
 from torch import nn
 
-from torchaid import BaseInputs, BaseOutputs, TaskModule, Mode, BaseMetrics, BaseMetricCalculator
+from torchaid import TaskModule, Mode, BaseMetrics, BaseMetricCalculator
 
-__all__ = ["Inputs", "TrainOutputs", "EvalOutputs", "MultiLabelClassification"]
+__all__ = ["MultiLabelClassification"]
 
-class Inputs(BaseInputs):
-    """Input schema for multi-label classification tasks.
-
-    Attributes:
-        inputs (torch.Tensor): Feature tensor of shape ``(B, *)``.
-        labels (torch.LongTensor): Ground-truth class indices of shape ``(B,)``.
-    """
-
-    inputs: torch.Tensor
-    labels: torch.LongTensor
-
-class TrainOutputs(BaseOutputs):
-    """Model outputs for the training phase.
-
-    Contains only the loss scalar; predictions are not computed during training
-    to reduce unnecessary computation.
-    """
-
-    pass
-
-class EvalOutputs(BaseOutputs):
-    """Model outputs for validation and test phases.
-
-    Extends :class:`TrainOutputs` with the predicted class indices.
-
-    Attributes:
-        predicted (torch.LongTensor): Predicted class indices of shape ``(B,)``,
-            obtained by taking the argmax over logits.
-    """
-
-    predicted: torch.LongTensor
 
 class MultiLabelClassification(TaskModule):
     """Task module for multi-class classification using cross-entropy loss.
@@ -64,7 +33,7 @@ class MultiLabelClassification(TaskModule):
         self.model = model
         self.criteria = nn.CrossEntropyLoss()
 
-    def forward(self, mode: Mode, batch: Inputs) -> BaseOutputs:
+    def forward(self, mode: Mode, batch: Any) -> dict[str, Any]:
         """Runs the forward pass and computes the cross-entropy loss.
 
         During training only the loss is returned. During validation and
@@ -83,10 +52,10 @@ class MultiLabelClassification(TaskModule):
         out = self.model(batch.inputs)
         loss = self.criteria(out, batch.labels)
         if mode == Mode.TRAIN:
-            return TrainOutputs(loss=loss)
+            return {"loss": loss}
 
         predicted = out.argmax(dim=-1)
-        return EvalOutputs(loss=loss, predicted=predicted)
+        return {"loss": loss, "predicted": predicted}
 
 class Metrics(BaseMetrics):
     """Metrics container for multi-label classification.
@@ -131,7 +100,7 @@ class MetricsCalculator(BaseMetricCalculator[Metrics]):
         self._predicted: list[torch.Tensor] = []
         self._labels: list[torch.Tensor] = []
 
-    def train_step(self, outputs: TrainOutputs, batch: Inputs) -> dict[str, Any]:
+    def train_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
         """Records the loss for a single training step.
 
         Args:
@@ -141,11 +110,11 @@ class MetricsCalculator(BaseMetricCalculator[Metrics]):
         Returns:
             dict[str, Any]: Dictionary ``{"loss": <float>}`` for progress bar display.
         """
-        loss = outputs.loss.item()
+        loss = outputs["loss"].item()
         self._train_loss_list.append(loss)
         return {"loss": loss}
 
-    def val_step(self, outputs: EvalOutputs, batch: Inputs) -> dict[str, Any]:
+    def val_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
         """Records the loss and predictions for a single validation step.
 
         Args:
@@ -156,14 +125,14 @@ class MetricsCalculator(BaseMetricCalculator[Metrics]):
         Returns:
             dict[str, Any]: Dictionary ``{"loss": <float>}`` for progress bar display.
         """
-        loss = outputs.loss.item()
+        loss = outputs["loss"].item()
         self._eval_loss_list.append(loss)
-        self._predicted.append(outputs.predicted)
-        self._labels.append(batch.labels)
+        self._predicted.append(outputs["predicted"])
+        self._labels.append(batch["labels"])
 
         return {"loss": loss}
 
-    def test_step(self, outputs: EvalOutputs, batch: Inputs) -> dict[str, Any]:
+    def test_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
         """Records metrics for a single test step (delegates to :meth:`val_step`).
 
         Args:

@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
+from typing import Any
 
 from torch import nn
 
-from . import BaseInputs, BaseOutputs
 from .configs import Mode
 
 __all__ = ['TaskModule']
@@ -16,7 +16,7 @@ class TaskModule(nn.Module, ABC):
     """
 
     @abstractmethod
-    def forward(self, mode: Mode, batch: BaseInputs) -> BaseOutputs:
+    def forward(self, mode: Mode, batch: Any) -> dict[str, Any]:
         """Runs the forward pass for the given operation mode.
 
         Args:
