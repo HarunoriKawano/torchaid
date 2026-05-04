@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, Optional
 
 from torch import nn
 
@@ -16,19 +16,21 @@ class TaskModule(nn.Module, ABC):
     """
 
     @abstractmethod
-    def forward(self, mode: Mode, batch: Any) -> dict[str, Any]:
+    def forward(self, mode: Mode, batch: dict[str, Any]) -> tuple[dict[str, Any], Optional[Any]]:
         """Runs the forward pass for the given operation mode.
 
         Args:
             mode (Mode): Indicates whether the call originates from a training,
                 validation, or test step. Implementations may return different
-                :class:`~torchaid.core.configs.BaseOutputs` subclasses depending
-                on the mode (e.g., omitting predictions during training).
-            batch (BaseInputs): Task-specific input data for the current batch.
+                output keys depending on the mode (e.g., omitting predictions
+                during training).
+            batch (dict[str, Any]): Task-specific input data for the current batch.
 
         Returns:
-            BaseOutputs: Model outputs including at least a scalar ``loss`` tensor.
-                Additional fields (e.g., predictions) may be included depending
-                on the mode and task.
+            tuple[dict[str, Any], Optional[Any]]: A 2-tuple of ``(outputs, error)``.
+            On success, ``error`` must be ``None`` and ``outputs`` must include a
+            scalar ``"loss"`` tensor for training steps. To signal a recoverable
+            per-batch error, return a non-``None`` value as ``error``; the framework
+            will skip backpropagation and log it to ``stderr``.
         """
         pass

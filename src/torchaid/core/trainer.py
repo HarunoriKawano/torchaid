@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from typing import Optional, Type, Any, Callable
 from itertools import islice
+import sys
 
 import pandas as pd
 from tqdm import tqdm
@@ -254,7 +255,9 @@ class TrainFramework:
 
         Puts the model in training or evaluation mode, advances the epoch/step
         counters, and dispatches each batch to :meth:`_train_step` or
-        :meth:`_eval_step` accordingly.
+        :meth:`_eval_step` accordingly. If a step returns a non-``None`` error,
+        the metric calculator is skipped for that batch, the error is printed to
+        ``stderr``, and — for training steps — the step counter is decremented.
 
         Args:
             dataloader: An iterable of batches. Can be a ``DataLoader`` or a
@@ -275,18 +278,29 @@ class TrainFramework:
             for data in pbar:
                 if mode is Mode.TRAIN:
                     self._metric_calculator.metrics.step += 1
-                    outputs, batch = self._train_step(data)
-                    display_items = self._metric_calculator.train_step(outputs, batch)
+                    outputs, batch, error = self._train_step(data)
+                    if error is None:
+                        display_items = self._metric_calculator.train_step(outputs, batch)
+                    else:
+                        self._metric_calculator.metrics.step -= 1
+
                 elif mode is Mode.VAL:
-                    outputs, batch = self._eval_step(data, Mode.VAL)
-                    display_items = self._metric_calculator.val_step(outputs, batch)
+                    outputs, batch, error = self._eval_step(data, Mode.VAL)
+                    if error is None:
+                        display_items = self._metric_calculator.val_step(outputs, batch)
+
                 else:
-                    outputs, batch = self._eval_step(data, Mode.TEST)
-                    display_items = self._metric_calculator.test_step(outputs, batch)
-                pbar.set_postfix(display_items)
+                    outputs, batch, error = self._eval_step(data, Mode.TEST)
+                    if error is None:
+                        display_items = self._metric_calculator.test_step(outputs, batch)
+
+                if error is None:
+                    pbar.set_postfix(display_items)
+                else:
+                    print(error, file=sys.stderr)
 
 
-    def _train_step(self, batch: dict[str, Any]):
+    def _train_step(self, batch: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], Optional[Any]]:
         """Executes a single training step including forward pass and backpropagation.
 
         Moves the batch to the target device, runs the forward pass under optional
@@ -298,18 +312,25 @@ class TrainFramework:
             batch (dict[str, Any]): Raw batch dictionary from the ``DataLoader``.
 
         Returns:
-            tuple[dict[str, Any], dict[str, Any]]: The model outputs and the input
-                batch, both with tensors on CPU.
+            tuple[dict[str, Any], dict[str, Any], Optional[Any]]: A 3-tuple of
+            ``(outputs, batch, error)``. On success, ``error`` is ``None`` and
+            both ``outputs`` and ``batch`` have tensors on CPU. If the model
+            returns a non-``None`` error, returns ``({}, {}, error)`` without
+            performing backpropagation.
 
         Raises:
-            KeyError: If the model output dict does not contain a ``"loss"`` key.
+            KeyError: If the model returns no error but ``outputs`` does not
+                contain a ``"loss"`` key.
         """
         batch = self._to_device(batch, torch.device(self._device))
 
         self._optimizer.zero_grad(set_to_none=True)
         dtype = torch.bfloat16 if self._ls.precision_dtype == "bfloat16" else torch.float16
         with autocast(device_type=self._device.type, enabled=self._ls.mixed_precision, dtype=dtype):
-            outputs: dict[str, Any] = self._task_module(Mode.TRAIN, batch=batch)
+            outputs, error = self._task_module(Mode.TRAIN, batch=batch)
+
+        if error is not None:
+            return {}, {}, error
 
         if "loss" not in outputs:
             raise KeyError(
@@ -330,10 +351,10 @@ class TrainFramework:
         batch = self._to_device(batch, torch.device("cpu"), detach=True)
         outputs = self._to_device(outputs, torch.device("cpu"), detach=True)
 
-        return outputs, batch
+        return outputs, batch, None
 
 
-    def _eval_step(self, batch: dict[str, Any], mode: Mode):
+    def _eval_step(self, batch: dict[str, Any], mode: Mode) -> tuple[dict[str, Any], dict[str, Any], Optional[Any]]:
         """Executes a single evaluation step without gradient computation.
 
         Moves the batch to the target device, runs the forward pass under optional
@@ -345,19 +366,24 @@ class TrainFramework:
                 to the model so it can adjust its output accordingly.
 
         Returns:
-            tuple[dict[str, Any], dict[str, Any]]: The model outputs and the input
-                batch, both with tensors on CPU.
+            tuple[dict[str, Any], dict[str, Any], Optional[Any]]: A 3-tuple of
+            ``(outputs, batch, error)``. On success, ``error`` is ``None`` and
+            both ``outputs`` and ``batch`` have tensors on CPU. If the model
+            returns a non-``None`` error, returns ``({}, {}, error)``.
         """
         batch = self._to_device(batch, torch.device(self._device))
 
         dtype = torch.bfloat16 if self._ls.precision_dtype == "bfloat16" else torch.float16
         with autocast(device_type=self._device.type, enabled=self._ls.mixed_precision, dtype=dtype):
-            outputs = self._task_module(mode, batch=batch)
+            outputs, error = self._task_module(mode, batch=batch)
+
+        if error is not None:
+            return {}, {}, error
 
         batch = self._to_device(batch, torch.device("cpu"), detach=True)
         outputs = self._to_device(outputs, torch.device("cpu"), detach=True)
 
-        return outputs, batch
+        return outputs, batch, None
 
 
     @staticmethod

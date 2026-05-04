@@ -33,7 +33,7 @@ class MultiLabelClassification(TaskModule):
         self.model = model
         self.criteria = nn.CrossEntropyLoss()
 
-    def forward(self, mode: Mode, batch: Any) -> dict[str, Any]:
+    def forward(self, mode: Mode, batch: dict[str, Any]) -> tuple[dict[str, Any], Optional[Any]]:
         """Runs the forward pass and computes the cross-entropy loss.
 
         During training only the loss is returned. During validation and
@@ -49,13 +49,13 @@ class MultiLabelClassification(TaskModule):
             BaseOutputs: :class:`TrainOutputs` in training mode, or
                 :class:`EvalOutputs` (with ``predicted`` field) otherwise.
         """
-        out = self.model(batch.inputs)
-        loss = self.criteria(out, batch.labels)
+        out = self.model(batch["inputs"])
+        loss = self.criteria(out, batch["labels"])
         if mode == Mode.TRAIN:
-            return {"loss": loss}
+            return {"loss": loss}, None
 
         predicted = out.argmax(dim=-1)
-        return {"loss": loss, "predicted": predicted}
+        return {"loss": loss, "predicted": predicted}, None
 
 class Metrics(BaseMetrics):
     """Metrics container for multi-label classification.
@@ -100,7 +100,7 @@ class MetricsCalculator(BaseMetricCalculator[Metrics]):
         self._predicted: list[torch.Tensor] = []
         self._labels: list[torch.Tensor] = []
 
-    def train_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
+    def train_step(self, outputs: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
         """Records the loss for a single training step.
 
         Args:
@@ -114,7 +114,7 @@ class MetricsCalculator(BaseMetricCalculator[Metrics]):
         self._train_loss_list.append(loss)
         return {"loss": loss}
 
-    def val_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
+    def val_step(self, outputs: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
         """Records the loss and predictions for a single validation step.
 
         Args:
@@ -132,7 +132,7 @@ class MetricsCalculator(BaseMetricCalculator[Metrics]):
 
         return {"loss": loss}
 
-    def test_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
+    def test_step(self, outputs: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
         """Records metrics for a single test step (delegates to :meth:`val_step`).
 
         Args:

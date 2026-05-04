@@ -29,12 +29,12 @@ class BaseMetricCalculator(ABC, Generic[T]):
         self.metrics = metrics
 
     @abstractmethod
-    def train_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
+    def train_step(self, outputs: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
         """Processes a single training step and updates internal accumulators.
 
         Args:
-            outputs (BaseOutputs): Model outputs returned by the forward pass.
-            batch (BaseInputs): Input batch used for the current step.
+            outputs (dict[str, Any]): Model outputs returned by the forward pass.
+            batch (dict[str, Any]): Input batch used for the current step.
 
         Returns:
             dict[str, Any]: Key-value pairs to display in the progress bar
@@ -43,12 +43,12 @@ class BaseMetricCalculator(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def val_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
+    def val_step(self, outputs: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
         """Processes a single validation step and updates internal accumulators.
 
         Args:
-            outputs (BaseOutputs): Model outputs returned by the forward pass.
-            batch (BaseInputs): Input batch used for the current step.
+            outputs (dict[str, Any]): Model outputs returned by the forward pass.
+            batch (dict[str, Any]): Input batch used for the current step.
 
         Returns:
             dict[str, Any]: Key-value pairs to display in the progress bar.
@@ -56,12 +56,12 @@ class BaseMetricCalculator(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def test_step(self, outputs: dict[str, Any], batch: Any) -> dict[str, Any]:
+    def test_step(self, outputs: dict[str, Any], batch: dict[str, Any]) -> dict[str, Any]:
         """Processes a single test step and updates internal accumulators.
 
         Args:
-            outputs (BaseOutputs): Model outputs returned by the forward pass.
-            batch (BaseInputs): Input batch used for the current step.
+            outputs (dict[str, Any]): Model outputs returned by the forward pass.
+            batch (dict[str, Any]): Input batch used for the current step.
 
         Returns:
             dict[str, Any]: Key-value pairs to display in the progress bar.
