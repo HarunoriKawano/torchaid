@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torchaid"
-version = "0.1.6"
+version = "0.1.7"
 description = "A PyTorch utility library that streamlines the deep learning training pipeline."
 readme = "README.md"
 license = { text = "MIT" }
