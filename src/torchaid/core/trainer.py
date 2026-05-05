@@ -175,6 +175,10 @@ class TrainFramework:
         ])
 
         for _ in range(remaining_epochs):
+            if self._metric_calculator.early_stopping():
+                print(f"\nEarly stopping triggered at epoch {self._metric_calculator.metrics.epoch}.")
+                break
+
             self._metric_calculator.reset()
             self._loop(train_dataloader, Mode.TRAIN)
             self._loop(val_dataloader, Mode.VAL)
@@ -197,10 +201,6 @@ class TrainFramework:
 
             self.save_checkpoint(str(checkpoint_path))
             print(f"  Checkpoint saved to '{checkpoint_path}'.")
-
-            if self._metric_calculator.early_stopping():
-                print(f"\nEarly stopping triggered at epoch {self._metric_calculator.metrics.epoch}.")
-                break
 
         self._strong_print([
             "Training complete.",
