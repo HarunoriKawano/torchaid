@@ -102,14 +102,14 @@ class TrainFramework:
         4. **Epoch loop** — for each remaining epoch, runs one training pass
            then one validation pass via :meth:`_loop`. After validation:
 
-           - If :meth:`~torchaid.core.metrics.BaseMetricCalculator.check`
+           - If :meth:`~torchaid.base.metrics.BaseMetricCalculator.check`
              returns ``True``, prints a best-model message and saves weights
              to ``best_checkpoint.pth`` via :meth:`save_checkpoint`.
            - Appends a row to ``epoch_log.csv``.
            - Prints a bordered metric summary for the epoch.
            - Saves a rolling checkpoint to ``checkpoint.pth`` and prints the
              save path.
-           - If :meth:`~torchaid.core.metrics.BaseMetricCalculator.early_stopping`
+           - If :meth:`~torchaid.base.metrics.BaseMetricCalculator.early_stopping`
              returns ``True``, prints an early-stopping message and exits the
              loop.
 
@@ -220,7 +220,7 @@ class TrainFramework:
 
         Resets the metric calculator, prints ``"Starting test evaluation..."``,
         runs one pass over ``test_dataset`` via :meth:`_loop`, calls
-        :meth:`~torchaid.core.metrics.BaseMetricCalculator.test` to finalize
+        :meth:`~torchaid.base.metrics.BaseMetricCalculator.test` to finalize
         metrics, and prints ``"Test evaluation complete."``.
 
         Args:
@@ -228,7 +228,7 @@ class TrainFramework:
 
         Returns:
             Any: The value returned by
-                :meth:`~torchaid.core.metrics.BaseMetricCalculator.test`.
+                :meth:`~torchaid.base.metrics.BaseMetricCalculator.test`.
                 Typically the populated metrics instance.
 
         Raises:
@@ -469,7 +469,7 @@ class TrainFramework:
         Loads model weights, optimizer state, optional scheduler state, and
         metric values from a file previously written by :meth:`save_checkpoint`.
         Metric fields are applied via
-        :meth:`~torchaid.core.metrics.BaseMetricCalculator.replace`, so only
+        :meth:`~torchaid.base.metrics.BaseMetricCalculator.replace`, so only
         keys that match declared metric fields are restored; extra keys are
         silently ignored.
 
@@ -516,7 +516,7 @@ class TrainFramework:
         validation batches to verify that the model, optimizer, data pipeline,
         and metric calculator are all configured correctly. Prints progress via
         ``"Running N train steps and N val steps..."`` and displays a metric
-        summary via :meth:`~torchaid.core.metrics.BaseMetricCalculator.system_check`.
+        summary via :meth:`~torchaid.base.metrics.BaseMetricCalculator.system_check`.
         Afterwards, the initial state is fully restored from the temporary
         checkpoint via :meth:`load_checkpoint` so that epoch and step counters
         are reset to zero before actual training begins. The temporary file is

@@ -102,7 +102,7 @@ class MyCalculator(BaseMetricCalculator[MyMetrics]):
 
 ```python
 import torch
-from torchaid.core.trainer import TrainFramework
+from torchaid.base.trainer import TrainFramework
 
 settings = MySettings(batch_size=32, max_epoch_num=10, device="cuda")
 model = MyModel(vocab_size=1000, num_classes=5)
@@ -133,7 +133,7 @@ framework.train(train_dataset, val_dataset, save_dir="./outputs")
 
 ```python
 from torchaid.templates import multilabel_classification as mlc
-from torchaid.core.trainer import TrainFramework
+from torchaid.base.trainer import TrainFramework
 from torch import nn
 import torch
 

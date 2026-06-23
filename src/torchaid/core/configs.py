@@ -1,65 +1,39 @@
-from abc import ABC
-from enum import Enum
-from typing import Annotated, Literal
+from typing import Optional, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 import torch
+from torch.optim import Optimizer
 
-__all__ = ['BaseMetrics', 'BaseSettings', 'Mode']
-
-class BaseMetrics(BaseModel, ABC):
-    """Abstract base class for tracking training metrics.
-
-    Subclasses extend this with task-specific metric fields.
-    The ``step`` and ``epoch`` counters are managed automatically by
-    :class:`~torchaid.core.trainer.TrainFramework`.
-
-    Attributes:
-        step (int): Total number of training steps completed so far.
-        epoch (int): Total number of epochs completed so far.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-    step: int = 0
-    epoch: int = 0
-
-class BaseSettings(BaseModel, ABC):
-    """Abstract base class for training configuration.
-
-    Subclasses add task-specific hyper-parameters on top of the common
-    fields defined here.
-
-    Attributes:
-        batch_size (int): Number of samples per mini-batch.
-        max_epoch_num (int): Maximum number of training epochs.
-        mixed_precision (bool): Whether to use automatic mixed-precision training.
-            Defaults to ``False``.
-        precision_dtype (Literal["float16", "bfloat16"]): Floating-point dtype used
-            when ``mixed_precision`` is enabled. Defaults to ``"bfloat16"``.
-        cpu_num_works (int): Number of worker processes for ``DataLoader``.
-            Defaults to ``4``.
-        device (Literal["cuda", "cpu"]): Device on which the model is trained.
-            Automatically set to ``"cuda"`` when a GPU is available, otherwise
-            falls back to ``"cpu"``.
-    """
-
-    batch_size: Annotated[int, Field(gt=0)]
-    max_epoch_num: Annotated[int, Field(gt=0)]
-    mixed_precision: bool = False
-    precision_dtype: Literal["float16", "bfloat16"] = "bfloat16"
-    cpu_num_works: Annotated[int, Field(ge=0)] = 4
-    device: Literal["cuda", "cpu"] = "cuda" if torch.cuda.is_available() else "cpu"
+from .task_module import TaskModuleInterface
 
 
-class Mode(Enum):
-    """Enumeration of operation modes used during the training pipeline.
+class HyperParameters(BaseModel):
+    model_config = ConfigDict(frozen=True)
 
-    Attributes:
-        TRAIN: Forward pass with gradient computation and parameter updates.
-        VAL: Forward pass without gradient computation, used for validation.
-        TEST: Forward pass without gradient computation, used for final evaluation.
-    """
+    max_epoch: int
+    batch_size: int
+    device: torch.device
+    cpu_num_works: int
+    amp: Optional[Literal["float16", "bfloat16"]] = None
 
-    TRAIN = "Train"
-    VAL = "Val"
-    TEST = "Test"
+class CoreComponents(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    task_module: TaskModuleInterface
+    optimizer: Optimizer
+
+    def save(self, path: str):
+        checkpoint = {
+            "model_state_dict": self.task_module.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+        }
+
+        torch.save(checkpoint, path)
+        print(f"Core components saved to {path}")
+
+    def load(self, path: str, device: torch.device):
+        checkpoint = torch.load(path, map_location=device)
+
+        self.task_module.load_state_dict(checkpoint["model_state_dict"])
+        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        print(f"Core components loaded from {path}")

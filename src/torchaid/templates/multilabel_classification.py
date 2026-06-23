@@ -41,7 +41,7 @@ class MultiLabelClassification(TaskModule):
 
         Args:
             mode (Mode): Operation mode. Returns :class:`TrainOutputs` when
-                ``mode`` is :attr:`~torchaid.core.configs.Mode.TRAIN`, otherwise
+                ``mode`` is :attr:`~torchaid.base.configs.Mode.TRAIN`, otherwise
                 returns :class:`EvalOutputs`.
             batch (Inputs): Input batch containing feature tensors and labels.
 
