@@ -4,8 +4,8 @@ import copy
 
 import torch
 from torch.amp import autocast
-from torch.utils.data import DataLoader
 
+from .protocols import SizedIterable
 from .states import FitContext, BatchState
 from .callback import CallbackManager
 from .configs import CoreComponents, HyperParameters
@@ -96,16 +96,17 @@ class Engine:
         self.metrics.update(batch_state, "val")
         self.callback_manager.on_val_batch_end(self.core_components, fit_context, batch_state)
 
-    def test(self, test_dataloader: DataLoader[BatchState], hyper_parameters: HyperParameters) -> MetricInterface:
-        self.callback_manager.on_test_begin(self.core_components)
+    def test(self, test_dataloader: SizedIterable[BatchState], hyper_parameters: HyperParameters) -> MetricInterface:
+        self.callback_manager.on_test_begin(self.core_components, test_dataloader, hyper_parameters)
         self.metrics.reset()
         for batch_state in test_dataloader:
             self._test_step(hyper_parameters, batch_state)
         self.metrics.compute("test")
+        self.callback_manager.on_test_end(self.core_components, test_dataloader, hyper_parameters)
         return self.metrics
 
     def _test_step(self, hyper_parameters: HyperParameters, batch_state: BatchState):
-        self.callback_manager.on_test_batch_start(self.core_components, batch_state)
+        self.callback_manager.on_test_batch_start(self.core_components, hyper_parameters, batch_state)
         batch_state.to(hyper_parameters.device)
 
         dtype = getattr(torch, hyper_parameters.amp) if hyper_parameters.amp is not None else None
@@ -114,7 +115,7 @@ class Engine:
 
         batch_state.to(torch.device("cpu"))
         self.metrics.update(batch_state, "test")
-        self.callback_manager.on_test_batch_end(self.core_components, batch_state)
+        self.callback_manager.on_test_batch_end(self.core_components, hyper_parameters, batch_state)
 
     def system_check(self, fit_context: FitContext, save_dir: str = "./system_check") -> None:
         copy_fit_context = copy.deepcopy(fit_context)

@@ -1,7 +1,8 @@
 from abc import ABC
 
-from .configs import CoreComponents
+from .configs import CoreComponents, HyperParameters
 from .states import BatchState, FitContext
+from .protocols import SizedIterable
 
 class CallbackInterface(ABC):
     """
@@ -21,10 +22,10 @@ class CallbackInterface(ABC):
     def on_val_batch_start(self, core_components: CoreComponents, fit_context: FitContext, batch_state: BatchState) -> None: ...
     def on_val_batch_end(self, core_components: CoreComponents, fit_context: FitContext, batch_state: BatchState) -> None: ...
 
-    def on_test_begin(self, core_components: CoreComponents) -> None: ...
-    def on_test_end(self, core_components: CoreComponents) -> None: ...
-    def on_test_batch_start(self, core_components: CoreComponents, batch_state: BatchState) -> None: ...
-    def on_test_batch_end(self, core_components: CoreComponents, batch_state: BatchState) -> None: ...
+    def on_test_begin(self, core_components: CoreComponents, test_dataloader: SizedIterable[BatchState], hyper_parameters: HyperParameters) -> None: ...
+    def on_test_end(self, core_components: CoreComponents, test_dataloader: SizedIterable[BatchState], hyper_parameters: HyperParameters) -> None: ...
+    def on_test_batch_start(self, core_components: CoreComponents, hyper_parameters: HyperParameters, batch_state: BatchState) -> None: ...
+    def on_test_batch_end(self, core_components: CoreComponents, hyper_parameters: HyperParameters, batch_state: BatchState) -> None: ...
 
 
 class CallbackManager(CallbackInterface):
@@ -71,18 +72,18 @@ class CallbackManager(CallbackInterface):
         for callback in self._callbacks:
             callback.on_val_batch_end(core_components, fit_context, batch_state)
 
-    def on_test_begin(self, core_components: CoreComponents) -> None:
+    def on_test_begin(self, core_components: CoreComponents, test_dataloader: SizedIterable[BatchState], hyper_parameters: HyperParameters) -> None:
         for callback in self._callbacks:
-            callback.on_test_begin(core_components)
+            callback.on_test_begin(core_components, test_dataloader, hyper_parameters)
 
-    def on_test_end(self, core_components: CoreComponents) -> None:
+    def on_test_end(self, core_components: CoreComponents, test_dataloader: SizedIterable[BatchState], hyper_parameters: HyperParameters) -> None:
         for callback in self._callbacks:
-            callback.on_test_end(core_components)
+            callback.on_test_end(core_components, test_dataloader, hyper_parameters)
 
-    def on_test_batch_start(self, core_components: CoreComponents, batch_state: BatchState) -> None:
+    def on_test_batch_start(self, core_components: CoreComponents, hyper_parameters: HyperParameters, batch_state: BatchState) -> None:
         for callback in self._callbacks:
-            callback.on_test_batch_start(core_components, batch_state)
+            callback.on_test_batch_start(core_components, hyper_parameters, batch_state)
 
-    def on_test_batch_end(self, core_components: CoreComponents, batch_state: BatchState) -> None:
+    def on_test_batch_end(self, core_components: CoreComponents, hyper_parameters: HyperParameters, batch_state: BatchState) -> None:
         for callback in self._callbacks:
-            callback.on_test_batch_end(core_components, batch_state)
+            callback.on_test_batch_end(core_components, hyper_parameters, batch_state)
